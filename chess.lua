@@ -156,10 +156,18 @@ GameStartedEvent.OnClientEvent:Connect(function(gameData)
             end)
         end
         
-        if myColor == "w" and gameData.whiteToPlay == true and IsAutomationEnabled then
-            local startingFen = generateFENFromPieces("w")
-            local bestMove = getStockfishMove(startingFen)
-            if bestMove then submitMoveToServer(bestMove) end
+        -- FIX: Added a 3-second delay here to allow the game to fully initialize before White moves
+        if myColor == "w" and gameData.whiteToPlay == true then
+            task.spawn(function()
+                task.wait(3) -- Wait for game load screen / initialization
+                if IsAutomationEnabled and currentGameID == gameData.gameID then
+                    local startingFen = generateFENFromPieces("w")
+                    local bestMove = getStockfishMove(startingFen)
+                    if bestMove then 
+                        submitMoveToServer(bestMove) 
+                    end
+                end
+            end)
         end
     end
 end)
