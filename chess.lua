@@ -19,7 +19,7 @@ local NetFolder = ReplicatedStorage:WaitForChild("Packages"):WaitForChild("RbxUt
 local GameStartedEvent = NetFolder:WaitForChild("RE/GameStarted")
 local PiecesFolder = LocalPlayer.PlayerGui:WaitForChild("2DBoard"):WaitForChild("Main"):WaitForChild("Pieces")
 
-local SERVER_URL = "https://ponz0217.pythonanywhere.com/get-best-move"
+local SERVER_URL = "https://repl-creator--ponzjeronne.replit.app/api/get-best-move"
 
 local IsAutomationEnabled = false 
 local EngineDepthSetting = 6       
