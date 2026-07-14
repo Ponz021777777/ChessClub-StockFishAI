@@ -19,7 +19,7 @@ local NetFolder = ReplicatedStorage:WaitForChild("Packages"):WaitForChild("RbxUt
 local GameStartedEvent = NetFolder:WaitForChild("RE/GameStarted")
 local PiecesFolder = LocalPlayer.PlayerGui:WaitForChild("2DBoard"):WaitForChild("Main"):WaitForChild("Pieces")
 
-local SERVER_URL = "https://e6b0-103-80-142-148.ngrok-free.app/get-best-move"
+local SERVER_URL = "https://chess-stockfish-api.onrender.com/get-best-move"
 
 local IsAutomationEnabled = false 
 local EngineDepthSetting = 6       
