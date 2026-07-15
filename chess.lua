@@ -1,4 +1,4 @@
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu'))()
 
 local Window = Rayfield:CreateWindow({
     Name = "Chess Club Stockfish",
@@ -21,16 +21,40 @@ local PiecesFolder = LocalPlayer.PlayerGui:WaitForChild("2DBoard"):WaitForChild(
 
 local SERVER_URL = "https://repl-creator--ponzjeronne.replit.app/api/get-best-move"
 
-local IsAutomationEnabled = false 
+local IsAutomationEnabled = false
 local EngineDepthSetting = 6       
 local currentGameID = nil
 local myColor = nil 
 local moveConnection = nil 
+local gameEndedConnection = nil
 
 local pieceTypeMap = {
     White_Pawn = "P", White_Knight = "N", White_Bishop = "B", White_Rook = "R", White_Queen = "Q", White_King = "K",
     Black_Pawn = "p", Black_Knight = "n", Black_Bishop = "b", Black_Rook = "r", Black_Queen = "q", Black_King = "k"
 }
+
+-- Best-effort device identifier, used only so the dashboard can tell
+-- different users apart in the recent-activity log. Different executors
+-- expose this under different global names, so we try the common ones and
+-- fall back to "unknown" if none are available.
+local cachedHWID = nil
+local function getHWID()
+    if cachedHWID then return cachedHWID end
+
+    local ok, hwid = pcall(function()
+        if gethwid then return gethwid() end
+        if get_hidden_hwid then return get_hidden_hwid() end
+        if syn and syn.get_hwid then return syn.get_hwid() end
+        if identifyexecutor then
+            local name, version = identifyexecutor()
+            return tostring(name) .. "-" .. tostring(version)
+        end
+        return nil
+    end)
+
+    cachedHWID = (ok and hwid) and tostring(hwid) or "unknown"
+    return cachedHWID
+end
 
 local function getColumnIndex(letter)
     return string.byte(string.upper(letter)) - 64
@@ -87,7 +111,7 @@ local function generateFENFromPieces(whoseTurn)
 end
 
 local function getStockfishMove(fenString)
-    local payload = HttpService:JSONEncode({ fen = fenString, depth = EngineDepthSetting })
+    local payload = HttpService:JSONEncode({ fen = fenString, depth = EngineDepthSetting, hwid = getHWID() })
     local requestFunc = request or (http and http.request) or (syn and syn.request)
     if not requestFunc then return nil end
 
@@ -108,6 +132,21 @@ local function getStockfishMove(fenString)
     end
 end
 
+local function sendOutcomeToServer(status)
+    local requestFunc = request or (http and http.request) or (syn and syn.request)
+    if not requestFunc then return end
+
+    local payload = HttpService:JSONEncode({ status = status, hwid = getHWID() })
+    pcall(function()
+        requestFunc({
+            Url = SERVER_URL:gsub("/get-best-move", "/game-over"),
+            Method = "POST",
+            Headers = { ["Content-Type"] = "application/json" },
+            Body = payload
+        })
+    end)
+end
+
 local function submitMoveToServer(moveStr)
     if not currentGameID then return end
     local remoteName = "RE/SubmitMove_" .. currentGameID
@@ -123,6 +162,7 @@ GameStartedEvent.OnClientEvent:Connect(function(gameData)
         currentGameID = gameData.gameID
         
         if moveConnection then moveConnection:Disconnect() end
+        if gameEndedConnection then gameEndedConnection:Disconnect() end
         
         if gameData.whiteName == LocalPlayer.Name then
             myColor = "w"
@@ -156,10 +196,26 @@ GameStartedEvent.OnClientEvent:Connect(function(gameData)
             end)
         end
         
-        -- FIX: Added a 3-second delay here to allow the game to fully initialize before White moves
+        local gameEndedRemoteName = "RE/GameEnded_" .. currentGameID
+        local GameEndedEvent = NetFolder:WaitForChild(gameEndedRemoteName, 5)
+        
+        if GameEndedEvent then
+            gameEndedConnection = GameEndedEvent.OnClientEvent:Connect(function(winnerName)
+                if winnerName == LocalPlayer.Name then
+                    sendOutcomeToServer("Win")
+                else
+                    sendOutcomeToServer("Loss/Draw")
+                end
+                
+                if moveConnection then moveConnection:Disconnect() end
+                if gameEndedConnection then gameEndedConnection:Disconnect() end
+                currentGameID = nil
+            end)
+        end
+        
         if myColor == "w" and gameData.whiteToPlay == true then
             task.spawn(function()
-                task.wait(3) -- Wait for game load screen / initialization
+                task.wait(3) 
                 if IsAutomationEnabled and currentGameID == gameData.gameID then
                     local startingFen = generateFENFromPieces("w")
                     local bestMove = getStockfishMove(startingFen)
