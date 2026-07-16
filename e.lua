@@ -234,27 +234,40 @@ GameStartedEvent.OnClientEvent:Connect(function(gameData)
         local gameEndedRemoteName = "RE/GameEnded_" .. currentGameID
         local GameEndedEvent = NetFolder:WaitForChild(gameEndedRemoteName, 5)
         
-                local gameEndedRemoteName = "RE/GameEnded_" .. currentGameID
-        local GameEndedEvent = NetFolder:WaitForChild(gameEndedRemoteName, 5)
-        
         if GameEndedEvent then
             gameEndedConnection = GameEndedEvent.OnClientEvent:Connect(function(gameResult)
-                -- Diagnostic debug logs
-                print("--- GAME OVER VIA MATH CODES ---")
-                print("Raw Remote Result Code Received:", gameResult, "Type:", typeof(gameResult))
+                print("--- GAME OVER TABLE PACKET ---")
+                
+                local score = nil
+
+                -- 1. Unpack and inspect the entire table contents into the console
+                if typeof(gameResult) == "table" then
+                    print("[TABLE LOOKUP] Scanning all incoming network keys:")
+                    for key, val in pairs(gameResult) do
+                        print("    -> Key Name: [" .. tostring(key) .. "] | Value: " .. tostring(val))
+                        
+                        -- If any key contains our magic chess numbers, grab it automatically
+                        local numCheck = tonumber(val)
+                        if numCheck == 1 or numCheck == 0 or numCheck == 0.5 then
+                            score = numCheck
+                        end
+                    end
+                else
+                    -- Fallback if it somehow isn't a table in a future patch
+                    score = tonumber(gameResult)
+                end
+
+                print("--------------------------------")
+                print("Extracted Numeric Score Metric:", tostring(score))
                 print("Your Current Match Color was:", tostring(myColor))
 
-                -- Force convert the raw payload value safely to a number 
-                local score = tonumber(gameResult)
-
+                -- 2. Run the win/loss evaluation logic tree
                 if not score then
-                    -- Fallback protection in case it sends structural dictionaries
-                    warn("[ERROR] Remote did not return a numeric result, dropping to default handler.")
+                    warn("[ERROR] No valid match result code could be extracted from the table. Defaulting to Loss/Draw.")
                     sendOutcomeToServer("Loss/Draw")
-                    print("Outcome: Fallback Loss/Draw")
+                    print("Outcome: Safe Fallback Loss/Draw")
                 
                 elseif score == 0.5 then
-                    -- 0.5 always signals an exact draw/stalemate state
                     sendOutcomeToServer("Loss/Draw")
                     print("Outcome: Draw Registered")
 
@@ -278,12 +291,11 @@ GameStartedEvent.OnClientEvent:Connect(function(gameData)
                         print("Outcome: Lost (Black)")
                     end
                 else
-                    -- Fallback condition safety catch
                     sendOutcomeToServer("Loss/Draw")
                     print("Outcome: Unknown State Loss/Draw")
                 end
                 
-                -- Standard runtime cleanup routines
+                -- Cleanup bindings
                 if moveConnection then moveConnection:Disconnect() end
                 if gameEndedConnection then gameEndedConnection:Disconnect() end
                 currentGameID = nil
