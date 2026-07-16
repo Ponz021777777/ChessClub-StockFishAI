@@ -143,6 +143,7 @@ local function sendOutcomeToServer(status)
             Body = payload
         })
     end)
+    print("Outcome Sent!")
 end
 
 local function submitMoveToServer(moveStr)
@@ -206,8 +207,10 @@ GameStartedEvent.OnClientEvent:Connect(function(gameData)
                 -- FIX: Explicit outcome handler that fires under all conditions
                 if resolvedWinner == cleanedMyName then
                     sendOutcomeToServer("Win")
+                    print("Won")
                 else
                     sendOutcomeToServer("Loss/Draw")
+                    print("Lost")
                 end
                 
                 if moveConnection then moveConnection:Disconnect() end
