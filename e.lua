@@ -236,9 +236,10 @@ GameStartedEvent.OnClientEvent:Connect(function(gameData)
         
         if GameEndedEvent then
             gameEndedConnection = GameEndedEvent.OnClientEvent:Connect(function(winnerName)
-                -- FIX: Convert to safe format and strip out trailing spacing
-                local resolvedWinner = winnerName and tostring(winnerName):match("^%s*(.-)%s*$") or ""
-                local cleanedMyName = LocalPlayer.Name:match("^%s*(.-)%s*$")
+                -- Fixes cases where winnerName is a player instance object instead of raw text
+                local rawName = typeof(winnerName) == "Instance" and winnerName:IsA("Player") and winnerName.Name or winnerName
+                local resolvedWinner = rawName and tostring(rawName):match("^%s*(.-)%s*$") or ""
+
                 
                 -- FIX: Explicit outcome handler that fires under all conditions
                 if resolvedWinner == cleanedMyName then
