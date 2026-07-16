@@ -234,25 +234,60 @@ GameStartedEvent.OnClientEvent:Connect(function(gameData)
         local gameEndedRemoteName = "RE/GameEnded_" .. currentGameID
         local GameEndedEvent = NetFolder:WaitForChild(gameEndedRemoteName, 5)
         
+                local gameEndedRemoteName = "RE/GameEnded_" .. currentGameID
+        local GameEndedEvent = NetFolder:WaitForChild(gameEndedRemoteName, 5)
+        
         if GameEndedEvent then
-            gameEndedConnection = GameEndedEvent.OnClientEvent:Connect(function(winnerName)
-                -- Fixes cases where winnerName is a player instance object instead of raw text
-                local rawName = typeof(winnerName) == "Instance" and winnerName:IsA("Player") and winnerName.Name or winnerName
-                local resolvedWinner = rawName and tostring(rawName):match("^%s*(.-)%s*$") or ""
+            gameEndedConnection = GameEndedEvent.OnClientEvent:Connect(function(gameResult)
+                -- Diagnostic debug logs
+                print("--- GAME OVER VIA MATH CODES ---")
+                print("Raw Remote Result Code Received:", gameResult, "Type:", typeof(gameResult))
+                print("Your Current Match Color was:", tostring(myColor))
 
-                
-                -- FIX: Explicit outcome handler that fires under all conditions
-                if resolvedWinner == cleanedMyName then
-                    sendOutcomeToServer("Win")
-                    print("Won")
-                else
+                -- Force convert the raw payload value safely to a number 
+                local score = tonumber(gameResult)
+
+                if not score then
+                    -- Fallback protection in case it sends structural dictionaries
+                    warn("[ERROR] Remote did not return a numeric result, dropping to default handler.")
                     sendOutcomeToServer("Loss/Draw")
-                    print("Lost")
+                    print("Outcome: Fallback Loss/Draw")
+                
+                elseif score == 0.5 then
+                    -- 0.5 always signals an exact draw/stalemate state
+                    sendOutcomeToServer("Loss/Draw")
+                    print("Outcome: Draw Registered")
+
+                elseif myColor == "w" then
+                    -- Logic when playing as White
+                    if score == 1 then
+                        sendOutcomeToServer("Win")
+                        print("Outcome: Won (White)")
+                    else
+                        sendOutcomeToServer("Loss/Draw")
+                        print("Outcome: Lost (White)")
+                    end
+
+                elseif myColor == "b" then
+                    -- Logic when playing as Black
+                    if score == 0 then
+                        sendOutcomeToServer("Win")
+                        print("Outcome: Won (Black)")
+                    else
+                        sendOutcomeToServer("Loss/Draw")
+                        print("Outcome: Lost (Black)")
+                    end
+                else
+                    -- Fallback condition safety catch
+                    sendOutcomeToServer("Loss/Draw")
+                    print("Outcome: Unknown State Loss/Draw")
                 end
                 
+                -- Standard runtime cleanup routines
                 if moveConnection then moveConnection:Disconnect() end
                 if gameEndedConnection then gameEndedConnection:Disconnect() end
                 currentGameID = nil
+                print("--------------------------------")
             end)
         end
         
