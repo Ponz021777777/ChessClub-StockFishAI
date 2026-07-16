@@ -1,7 +1,7 @@
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
-    Name = "Chess Club Stockfish V2.0",
+    Name = "Chess Club Stockfish V2.01",
     LoadingTitle = "Initializing Stockfish",
     LoadingSubtitle = "Stockfish",
     ConfigurationSaving = { Enabled = false },
@@ -193,52 +193,78 @@ local function submitMoveToServer(moveStr)
 end
 
 local lastProcessedFEN = ""
+local isThinking = false
+local isProcessingEnd = false
 
 GameStartedEvent.OnClientEvent:Connect(function(gameData)
-    if gameData and gameData.gameID then
-        currentGameID = gameData.gameID
-        lastProcessedFEN = "" 
-        
-        if moveConnection then moveConnection:Disconnect(); moveConnection = nil end
-        if gameEndedConnection then gameEndedConnection:Disconnect(); gameEndedConnection = nil end
-        
-        if gameData.whiteName == LocalPlayer.Name then
-            myColor = "w"
-        else
-            myColor = "b"
-        end
-        
-        local moveMadeRemoteName = "RE/MoveMade_" .. currentGameID
-        local MoveMadeEvent = NetFolder:WaitForChild(moveMadeRemoteName, 5)
-        
-        if MoveMadeEvent then
-            local isThinking = false
+    if not (gameData and gameData.gameID) then return end
+    
+    currentGameID = gameData.gameID
+    lastProcessedFEN = "" 
+    isThinking = false       -- Reset movement locks for the new match
+    isProcessingEnd = false  -- Reset game-over locks for the new match
+    
+    if moveConnection then moveConnection:Disconnect(); moveConnection = nil end
+    if gameEndedConnection then gameEndedConnection:Disconnect(); gameEndedConnection = nil end
+    
+    if gameData.whiteName == LocalPlayer.Name then
+        myColor = "w"
+    else
+        myColor = "b"
+    end
+    
+    local moveMadeRemoteName = "RE/MoveMade_" .. currentGameID
+    local MoveMadeEvent = NetFolder:WaitForChild(moveMadeRemoteName, 5)
+    
+    if MoveMadeEvent then
+        moveConnection = MoveMadeEvent.OnClientEvent:Connect(function(...)
+            if not IsAutomationEnabled or isThinking then return end
+            isThinking = true 
 
-            moveConnection = MoveMadeEvent.OnClientEvent:Connect(function(...)
-                if not IsAutomationEnabled or isThinking then return end
-                isThinking = true 
-
-                task.wait(0.3) 
+            task.wait(0.3) 
+            
+            if not IsAutomationEnabled or not currentGameID then 
+                isThinking = false
+                return 
+            end
+            
+            local currentFen = generateFENFromPieces(myColor)
+            if currentFen == lastProcessedFEN then
+                isThinking = false
+                return 
+            end
+            
+            lastProcessedFEN = currentFen 
+            
+            local randomHumanDelay = math.random(2, 20) / 10
+            local startTime = os.clock()
+            
+            -- FIX 1: Wrap network calculation in a separate thread task block with a timeout fail-safe
+            task.spawn(function()
+                local bestMove = nil
                 
-                if not IsAutomationEnabled or not currentGameID then 
-                    isThinking = false
-                    return 
+                -- Spawn the API request inside a thread so if it hangs, it doesn't freeze the script
+                local calculationThread = task.spawn(function()
+                    bestMove = getStockfishMove(currentFen)
+                end)
+                
+                -- Wait for either the move to complete or a hard 5-second timeout limit to pass
+                local timeoutCounter = 0
+                while bestMove == nil and timeoutCounter < 50 do
+                    task.wait(0.1)
+                    timeoutCounter = timeoutCounter + 1
+                    if not currentGameID then break end
                 end
                 
-                local currentFen = generateFENFromPieces(myColor)
-                if currentFen == lastProcessedFEN then
+                -- If it timed out, force kill the hung API request thread
+                if bestMove == nil then
+                    print("[Automation Fail-safe] Stockfish API hung up! Resetting state engine.")
+                    coroutine.close(calculationThread)
                     isThinking = false
-                    return 
+                    return
                 end
-                
-                lastProcessedFEN = currentFen 
-                
-                local randomHumanDelay = math.random(2, 20) / 10
-                local startTime = os.clock()
-                
-                local bestMove = getStockfishMove(currentFen)
+
                 local elapsedTime = os.clock() - startTime
-                
                 if elapsedTime < randomHumanDelay then
                     task.wait(randomHumanDelay - elapsedTime)
                 end
@@ -247,71 +273,74 @@ GameStartedEvent.OnClientEvent:Connect(function(gameData)
                     submitMoveToServer(bestMove)
                 end
                 
-                isThinking = false
+                isThinking = false -- Unlock turn thread processing
             end)
-        end
-        
-        local gameEndedRemoteName = "RE/GameEnded_" .. currentGameID
-        local GameEndedEvent = NetFolder:WaitForChild(gameEndedRemoteName, 5)
-        
-        if GameEndedEvent then
-            local isProcessingEnd = false
+        end)
+    end
+    
+    local gameEndedRemoteName = "RE/GameEnded_" .. currentGameID
+    local GameEndedEvent = NetFolder:WaitForChild(gameEndedRemoteName, 5)
+    
+    if GameEndedEvent then
+        gameEndedConnection = GameEndedEvent.OnClientEvent:Connect(function(gameResult)
+            -- FIX 2: Check the global guard lock BEFORE running anything else to drop duplicates instantly
+            if isProcessingEnd then return end
+            isProcessingEnd = true
+            
+            -- Force clean up connection structures right away
+            if moveConnection then moveConnection:Disconnect(); moveConnection = nil end
+            if gameEndedConnection then gameEndedConnection:Disconnect(); gameEndedConnection = nil end
+            
+            print("--- [GLOBAL LOCK] GAME OVER PACKET PROCESSED ---")
+            
+            local score = nil
+            local validDataFound = false
 
-            gameEndedConnection = GameEndedEvent.OnClientEvent:Connect(function(gameResult)
-                if moveConnection then moveConnection:Disconnect(); moveConnection = nil end
-                if gameEndedConnection then gameEndedConnection:Disconnect(); gameEndedConnection = nil end
-                
-                if isProcessingEnd then return end
-                isProcessingEnd = true
-                
-                local score = nil
-                local validDataFound = false
-
-                if typeof(gameResult) == "table" then
-                    for _, val in pairs(gameResult) do
-                        validDataFound = true
-                        local numCheck = tonumber(val)
-                        if numCheck == 1 or numCheck == 0 or numCheck == 0.5 then
-                            score = numCheck
-                        end
+            if typeof(gameResult) == "table" then
+                for _, val in pairs(gameResult) do
+                    validDataFound = true
+                    local numCheck = tonumber(val)
+                    if numCheck == 1 or numCheck == 0 or numCheck == 0.5 then
+                        score = numCheck
                     end
-                else
-                    score = tonumber(gameResult)
-                    if score then validDataFound = true end
                 end
+            else
+                score = tonumber(gameResult)
+                if score then validDataFound = true end
+            end
 
-                if not validDataFound and gameResult == nil then
-                    currentGameID = nil
-                    return
-                end
-
-                if not score or score == 0.5 then
-                    sendOutcomeToServer("Loss/Draw")
-                elseif myColor == "w" then
-                    sendOutcomeToServer(score == 1 and "Win" or "Loss/Draw")
-                elseif myColor == "b" then
-                    sendOutcomeToServer(score == 0 and "Win" or "Loss/Draw")
-                end
-                
+            if not validDataFound and gameResult == nil then
                 currentGameID = nil
-            end)
-        end
-        
-        if myColor == "w" and gameData.whiteToPlay == true then
-            task.spawn(function()
-                task.wait(3) 
-                if IsAutomationEnabled and currentGameID == gameData.gameID then
-                    local startingFen = generateFENFromPieces("w")
-                    lastProcessedFEN = startingFen
-                    local bestMove = getStockfishMove(startingFen)
-                    if bestMove then 
-                        submitMoveToServer(bestMove)
-                    end
+                return
+            end
+
+            if not score or score == 0.5 then
+                sendOutcomeToServer("Loss/Draw")
+            elseif myColor == "w" then
+                sendOutcomeToServer(score == 1 and "Win" or "Loss/Draw")
+            elseif myColor == "b" then
+                sendOutcomeToServer(score == 0 and "Win" or "Loss/Draw")
+            end
+            
+            currentGameID = nil
+        end)
+    end
+    
+    if myColor == "w" and gameData.whiteToPlay == true then
+        task.spawn(function()
+            task.wait(3) 
+            if IsAutomationEnabled and currentGameID == gameData.gameID then
+                local startingFen = generateFENFromPieces("w")
+                lastProcessedFEN = startingFen
+                local bestMove = getStockfishMove(startingFen)
+                if bestMove then 
+                    submitMoveToServer(bestMove)
                 end
-            end)
-        end
+            end
+        end)
     end
 end)
+
 
 local MasterToggle = MainTab:CreateToggle({
     Name = "Enable Engine Automation",
