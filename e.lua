@@ -131,20 +131,54 @@ local function getStockfishMove(fenString)
 end
 
 local function sendOutcomeToServer(status)
-    local requestFunc = request or (http and http.request) or (syn and syn.request)
-    if not requestFunc then return end
+    print("[DEBUG] sendOutcomeToServer was CALLED with status: " .. tostring(status))
 
+    local requestFunc = request or (http and http.request) or (syn and syn.request)
+    if not requestFunc then 
+        print("[DEBUG ERROR] Request failed: No HTTP executor function found (request/http/syn missing)!")
+        return 
+    end
+
+    local targetUrl = SERVER_URL:gsub("/get-best-move", "/game-over")
     local payload = HttpService:JSONEncode({ status = status, hwid = getHWID() })
-    pcall(function()
-        requestFunc({
-            Url = SERVER_URL:gsub("/get-best-move", "/game-over"),
+    
+    print("[DEBUG] Attempting network request...")
+    print("        Target URL: " .. tostring(targetUrl))
+    print("        Payload: " .. tostring(payload))
+
+    -- Copying the exact style of your getStockfishMove function
+    local success, response = pcall(function()
+        return requestFunc({
+            Url = targetUrl,
             Method = "POST",
             Headers = { ["Content-Type"] = "application/json" },
             Body = payload
         })
     end)
-    print("Outcome Sent!")
+
+    -- Verify if the script executed the request without breaking
+    if not success then
+        warn("[DEBUG CRITICAL] Network request CRASHED before leaving your client!")
+        warn("                  Lua Error Message: " .. tostring(response))
+        return
+    end
+
+    -- Verify if the request sent and returned data successfully
+    if response then
+        print("[DEBUG SUCCESS] Request left client! Server responded.")
+        print("                Status Code: " .. tostring(response.StatusCode))
+        print("                Response Body: " .. tostring(response.Body))
+        
+        if response.StatusCode == 200 then
+            print("[DEBUG] Server accepted the game outcome perfectly.")
+        else
+            warn("[DEBUG] Server received request but returned an error code.")
+        end
+    else
+        warn("[DEBUG ERROR] Request executed but the response object returned nil!")
+    end
 end
+
 
 local function submitMoveToServer(moveStr)
     if not currentGameID then return end
