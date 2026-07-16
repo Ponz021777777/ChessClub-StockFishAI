@@ -141,6 +141,8 @@ local function sendOutcomeToServer(status)
 
     local targetUrl = SERVER_URL:gsub("/get-best-move", "/game-over")
     local payload = HttpService:JSONEncode({ status = status, hwid = getHWID() })
+
+    print("[RAW JSON SENT TO SERVER]: " .. payload)
     
     print("[DEBUG] Attempting network request...")
     print("        Target URL: " .. tostring(targetUrl))
