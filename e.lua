@@ -1,4 +1,4 @@
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu'))()
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
     Name = "Chess Club Stockfish",
@@ -19,7 +19,7 @@ local NetFolder = ReplicatedStorage:WaitForChild("Packages"):WaitForChild("RbxUt
 local GameStartedEvent = NetFolder:WaitForChild("RE/GameStarted")
 local PiecesFolder = LocalPlayer.PlayerGui:WaitForChild("2DBoard"):WaitForChild("Main"):WaitForChild("Pieces")
 
-local SERVER_URL = "https://replit.app"
+local SERVER_URL = "https://repl-creator--ponzjeronne.replit.app/api/get-best-move"
 
 local IsAutomationEnabled = false
 local EngineDepthSetting = 6       
