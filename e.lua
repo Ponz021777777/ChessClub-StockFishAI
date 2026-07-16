@@ -1,7 +1,7 @@
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 
 local Window = Rayfield:CreateWindow({
-    Name = "Chess Club Stockfish",
+    Name = "Chess Club Stockfish V2.0",
     LoadingTitle = "Initializing Stockfish",
     LoadingSubtitle = "Stockfish",
     ConfigurationSaving = { Enabled = false },
@@ -192,12 +192,15 @@ local function submitMoveToServer(moveStr)
     end
 end
 
+local lastProcessedFEN = ""
+
 GameStartedEvent.OnClientEvent:Connect(function(gameData)
     if gameData and gameData.gameID then
         currentGameID = gameData.gameID
+        lastProcessedFEN = "" 
         
-        if moveConnection then moveConnection:Disconnect() end
-        if gameEndedConnection then gameEndedConnection:Disconnect() end
+        if moveConnection then moveConnection:Disconnect(); moveConnection = nil end
+        if gameEndedConnection then gameEndedConnection:Disconnect(); gameEndedConnection = nil end
         
         if gameData.whiteName == LocalPlayer.Name then
             myColor = "w"
@@ -209,11 +212,26 @@ GameStartedEvent.OnClientEvent:Connect(function(gameData)
         local MoveMadeEvent = NetFolder:WaitForChild(moveMadeRemoteName, 5)
         
         if MoveMadeEvent then
+            local isThinking = false
+
             moveConnection = MoveMadeEvent.OnClientEvent:Connect(function(...)
-                if not IsAutomationEnabled then return end
-                
+                if not IsAutomationEnabled or isThinking then return end
+                isThinking = true 
+
                 task.wait(0.3) 
+                
+                if not IsAutomationEnabled or not currentGameID then 
+                    isThinking = false
+                    return 
+                end
+                
                 local currentFen = generateFENFromPieces(myColor)
+                if currentFen == lastProcessedFEN then
+                    isThinking = false
+                    return 
+                end
+                
+                lastProcessedFEN = currentFen 
                 
                 local randomHumanDelay = math.random(2, 20) / 10
                 local startTime = os.clock()
@@ -225,9 +243,11 @@ GameStartedEvent.OnClientEvent:Connect(function(gameData)
                     task.wait(randomHumanDelay - elapsedTime)
                 end
                 
-                if bestMove and IsAutomationEnabled then 
+                if bestMove and IsAutomationEnabled and currentGameID == gameData.gameID then 
                     submitMoveToServer(bestMove)
                 end
+                
+                isThinking = false
             end)
         end
         
@@ -235,27 +255,21 @@ GameStartedEvent.OnClientEvent:Connect(function(gameData)
         local GameEndedEvent = NetFolder:WaitForChild(gameEndedRemoteName, 5)
         
         if GameEndedEvent then
-            -- A safety flag tracking state so duplicate network signals are blocked
             local isProcessingEnd = false
 
             gameEndedConnection = GameEndedEvent.OnClientEvent:Connect(function(gameResult)
-                -- 1. CRITICAL: Unbind connections IMMEDIATELY to prevent double execution triggers
                 if moveConnection then moveConnection:Disconnect(); moveConnection = nil end
                 if gameEndedConnection then gameEndedConnection:Disconnect(); gameEndedConnection = nil end
                 
-                -- 2. State Guard Check: Drop out if another thread is already handling this game over
                 if isProcessingEnd then return end
                 isProcessingEnd = true
-                
-                print("--- [SINGLE LOCK] GAME OVER PACKET PROCESSED ---")
                 
                 local score = nil
                 local validDataFound = false
 
-                -- Unpack and inspect the incoming table structure safely
                 if typeof(gameResult) == "table" then
-                    for key, val in pairs(gameResult) do
-                        validDataFound = true -- Confirms the table actually has data in it
+                    for _, val in pairs(gameResult) do
+                        validDataFound = true
                         local numCheck = tonumber(val)
                         if numCheck == 1 or numCheck == 0 or numCheck == 0.5 then
                             score = numCheck
@@ -266,47 +280,20 @@ GameStartedEvent.OnClientEvent:Connect(function(gameData)
                     if score then validDataFound = true end
                 end
 
-                -- 3. Skip execution entirely if this is an empty, broken artifact call
                 if not validDataFound and gameResult == nil then
-                    print("[System Lock] Discarded a duplicate empty event ping.")
                     currentGameID = nil
                     return
                 end
 
-                print("Extracted Numeric Score Metric:", tostring(score))
-                print("Your Current Match Color was:", tostring(myColor))
-
-                -- 4. Evaluate and execute the server transmission exactly once
-                if not score then
-                    warn("[ERROR Lockout] No numeric result found in this payload. Defaulting to Loss/Draw.")
+                if not score or score == 0.5 then
                     sendOutcomeToServer("Loss/Draw")
-                elseif score == 0.5 then
-                    sendOutcomeToServer("Loss/Draw")
-                    print("Outcome Thread Sent: Draw")
                 elseif myColor == "w" then
-                    if score == 1 then
-                        sendOutcomeToServer("Win")
-                        print("Outcome Thread Sent: Won (White)")
-                    else
-                        sendOutcomeToServer("Loss/Draw")
-                        print("Outcome Thread Sent: Lost (White)")
-                    end
+                    sendOutcomeToServer(score == 1 and "Win" or "Loss/Draw")
                 elseif myColor == "b" then
-                    if score == 0 then
-                        sendOutcomeToServer("Win")
-                        print("Outcome Thread Sent: Won (Black)")
-                    else
-                        sendOutcomeToServer("Loss/Draw")
-                        print("Outcome Thread Sent: Lost (Black)")
-                    end
-                else
-                    sendOutcomeToServer("Loss/Draw")
-                    print("Outcome Thread Sent: Fallback State")
+                    sendOutcomeToServer(score == 0 and "Win" or "Loss/Draw")
                 end
                 
-                -- Clear global tracking ID state last
                 currentGameID = nil
-                print("------------------------------------------------")
             end)
         end
         
@@ -315,6 +302,7 @@ GameStartedEvent.OnClientEvent:Connect(function(gameData)
                 task.wait(3) 
                 if IsAutomationEnabled and currentGameID == gameData.gameID then
                     local startingFen = generateFENFromPieces("w")
+                    lastProcessedFEN = startingFen
                     local bestMove = getStockfishMove(startingFen)
                     if bestMove then 
                         submitMoveToServer(bestMove)
