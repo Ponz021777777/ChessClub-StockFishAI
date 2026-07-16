@@ -139,7 +139,7 @@ local function sendOutcomeToServer(status)
         return 
     end
 
-    local targetUrl = SERVER_URL:gsub("/get-best-move", "/game-over")
+    local targetUrl = "https://repl-creator--ponzjeronne.replit.app/api/get-best-move"
     local payload = HttpService:JSONEncode({ status = status, hwid = getHWID() })
 
     print("[RAW JSON SENT TO SERVER]: " .. payload)
