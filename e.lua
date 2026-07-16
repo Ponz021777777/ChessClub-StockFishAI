@@ -235,71 +235,78 @@ GameStartedEvent.OnClientEvent:Connect(function(gameData)
         local GameEndedEvent = NetFolder:WaitForChild(gameEndedRemoteName, 5)
         
         if GameEndedEvent then
+            -- A safety flag tracking state so duplicate network signals are blocked
+            local isProcessingEnd = false
+
             gameEndedConnection = GameEndedEvent.OnClientEvent:Connect(function(gameResult)
-                print("--- GAME OVER TABLE PACKET ---")
+                -- 1. CRITICAL: Unbind connections IMMEDIATELY to prevent double execution triggers
+                if moveConnection then moveConnection:Disconnect(); moveConnection = nil end
+                if gameEndedConnection then gameEndedConnection:Disconnect(); gameEndedConnection = nil end
+                
+                -- 2. State Guard Check: Drop out if another thread is already handling this game over
+                if isProcessingEnd then return end
+                isProcessingEnd = true
+                
+                print("--- [SINGLE LOCK] GAME OVER PACKET PROCESSED ---")
                 
                 local score = nil
+                local validDataFound = false
 
-                -- 1. Unpack and inspect the entire table contents into the console
+                -- Unpack and inspect the incoming table structure safely
                 if typeof(gameResult) == "table" then
-                    print("[TABLE LOOKUP] Scanning all incoming network keys:")
                     for key, val in pairs(gameResult) do
-                        print("    -> Key Name: [" .. tostring(key) .. "] | Value: " .. tostring(val))
-                        
-                        -- If any key contains our magic chess numbers, grab it automatically
+                        validDataFound = true -- Confirms the table actually has data in it
                         local numCheck = tonumber(val)
                         if numCheck == 1 or numCheck == 0 or numCheck == 0.5 then
                             score = numCheck
                         end
                     end
                 else
-                    -- Fallback if it somehow isn't a table in a future patch
                     score = tonumber(gameResult)
+                    if score then validDataFound = true end
                 end
 
-                print("--------------------------------")
+                -- 3. Skip execution entirely if this is an empty, broken artifact call
+                if not validDataFound and gameResult == nil then
+                    print("[System Lock] Discarded a duplicate empty event ping.")
+                    currentGameID = nil
+                    return
+                end
+
                 print("Extracted Numeric Score Metric:", tostring(score))
                 print("Your Current Match Color was:", tostring(myColor))
 
-                -- 2. Run the win/loss evaluation logic tree
+                -- 4. Evaluate and execute the server transmission exactly once
                 if not score then
-                    warn("[ERROR] No valid match result code could be extracted from the table. Defaulting to Loss/Draw.")
+                    warn("[ERROR Lockout] No numeric result found in this payload. Defaulting to Loss/Draw.")
                     sendOutcomeToServer("Loss/Draw")
-                    print("Outcome: Safe Fallback Loss/Draw")
-                
                 elseif score == 0.5 then
                     sendOutcomeToServer("Loss/Draw")
-                    print("Outcome: Draw Registered")
-
+                    print("Outcome Thread Sent: Draw")
                 elseif myColor == "w" then
-                    -- Logic when playing as White
                     if score == 1 then
                         sendOutcomeToServer("Win")
-                        print("Outcome: Won (White)")
+                        print("Outcome Thread Sent: Won (White)")
                     else
                         sendOutcomeToServer("Loss/Draw")
-                        print("Outcome: Lost (White)")
+                        print("Outcome Thread Sent: Lost (White)")
                     end
-
                 elseif myColor == "b" then
-                    -- Logic when playing as Black
                     if score == 0 then
                         sendOutcomeToServer("Win")
-                        print("Outcome: Won (Black)")
+                        print("Outcome Thread Sent: Won (Black)")
                     else
                         sendOutcomeToServer("Loss/Draw")
-                        print("Outcome: Lost (Black)")
+                        print("Outcome Thread Sent: Lost (Black)")
                     end
                 else
                     sendOutcomeToServer("Loss/Draw")
-                    print("Outcome: Unknown State Loss/Draw")
+                    print("Outcome Thread Sent: Fallback State")
                 end
                 
-                -- Cleanup bindings
-                if moveConnection then moveConnection:Disconnect() end
-                if gameEndedConnection then gameEndedConnection:Disconnect() end
+                -- Clear global tracking ID state last
                 currentGameID = nil
-                print("--------------------------------")
+                print("------------------------------------------------")
             end)
         end
         
